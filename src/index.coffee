@@ -10,6 +10,7 @@ thrower = ({status, info}) ->
   Error.captureStackTrace error, thrower
 
   error.status = status
+  error.info = info
   error._exoid = true
 
   throw error
