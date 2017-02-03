@@ -25,6 +25,10 @@ assert = (obj, schema) ->
       Error.captureStackTrace error, assert
       throw error
 
+BATCH_CHUNK_TIMEOUT_MS = 30
+BATCH_CHUNK_TIMEOUT_BACKOFF_MS = 50
+MAX_BATCH_CHUNK_TIMEOUT_MS = 15000
+
 class ExoidRouter
   constructor: (@state = {}) -> null
 
@@ -41,22 +45,15 @@ class ExoidRouter
       }, state
 
   resolve: (path, body, req, io) =>
-    cache = []
     return new Promise (resolve) =>
       handler = @state.paths[path]
 
       unless handler
         @throw {status: 400, info: "Handler not found for path: #{path}"}
 
-      resolve handler body, _.defaults({
-        cache: (id, resource) ->
-          if _.isPlainObject id
-            resource = id
-            id = id.id
-          cache.push {path: id, result: resource}
-      }, req), io
+      resolve handler body, req, io
     .then (result) ->
-      {result, cache, error: null}
+      {result, error: null}
     .catch (error) ->
       log.error error
       errObj = if error._exoid
@@ -64,7 +61,7 @@ class ExoidRouter
       else
         {status: 500}
 
-      {result: null, error: errObj, cache: cache}
+      {result: null, error: errObj}
 
   setMiddleware: (@middlewareFn) => null
 
@@ -76,10 +73,22 @@ class ExoidRouter
 
     socket.on 'exoid', (body) =>
       requests = body?.requests
-      cache = []
+      isComplete = false
 
-      emitBatch = (response) ->
-        socket.emit body.batchId, response
+      emitBatchChunk = (responses) ->
+        socket.emit body.batchId, responses
+
+      responseChunk = {}
+      timeoutMs = BATCH_CHUNK_TIMEOUT_MS
+      emitBatchChunkFn = ->
+        timeoutMs += BATCH_CHUNK_TIMEOUT_BACKOFF_MS
+        unless _.isEmpty responseChunk
+          emitBatchChunk responseChunk
+          responseChunk = {}
+        if timeoutMs < MAX_BATCH_CHUNK_TIMEOUT_MS and not isComplete
+          setTimeout emitBatchChunkFn, timeoutMs
+
+      setTimeout emitBatchChunkFn, timeoutMs
 
       @middlewareFn body, socket.request
       .then (req) =>
@@ -90,13 +99,14 @@ class ExoidRouter
             body: Joi.any().optional()
             streamId: Joi.string().optional()
         catch error
-          return emitBatch {
+          isComplete = true
+          responseChunk = {
             isError: true
             status: error.status
             info: error.info
           }
 
-        Promise.all _.map requests, (request) =>
+        Promise.map requests, (request) =>
           emitRequest = (response) ->
             socket.emit request.streamId, response
           @resolve request.path, request.body, socket.request, {
@@ -104,15 +114,13 @@ class ExoidRouter
             route: request.path
             socket: socket
           }
-        .then (settled) ->
-          {
-            results: _.map settled, ({result}) -> result
-            errors: _.map settled, ({error}) -> error
-            cache: _.reduce settled, (cache, result) ->
-              cache.concat result.cache
-            , []
-          }
-      .then (response) -> emitBatch response
+          .then (response) ->
+            responseChunk[request.streamId] = response
+        .catch (err) ->
+          console.log err
+        .then ->
+          isComplete = true
+
       .catch (err) ->
         console.log err
 
