@@ -3,7 +3,7 @@ log = require 'loga'
 Joi = require 'joi'
 Promise = require 'bluebird'
 
-thrower = ({status, info}) ->
+thrower = ({status, info, ignoreLog}) ->
   status ?= 400
 
   error = new Error info
@@ -11,6 +11,7 @@ thrower = ({status, info}) ->
 
   error.status = status
   error.info = info
+  error.ignoreLog = ignoreLog
   error._exoid = true
 
   throw error
@@ -30,8 +31,7 @@ BATCH_CHUNK_TIMEOUT_BACKOFF_MS = 50
 MAX_BATCH_CHUNK_TIMEOUT_MS = 15000
 
 class ExoidRouter
-  constructor: (@state = {}, {@logErrors} = {}) ->
-    @logErrors ?= true
+  constructor: (@state = {}) -> null
 
   throw: thrower
   assert: assert
@@ -55,8 +55,8 @@ class ExoidRouter
       resolve handler body, req, io
     .then (result) ->
       {result, error: null}
-    .catch (error) =>
-      if @logErrors
+    .catch (error) ->
+      unless error.ignoreLog
         log.error error
       errObj = if error._exoid
         {status: error.status, info: error.info}
