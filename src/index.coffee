@@ -30,7 +30,8 @@ BATCH_CHUNK_TIMEOUT_BACKOFF_MS = 50
 MAX_BATCH_CHUNK_TIMEOUT_MS = 15000
 
 class ExoidRouter
-  constructor: (@state = {}) -> null
+  constructor: (@state = {}, {@logErrors} = {}) ->
+    @logErrors ?= true
 
   throw: thrower
   assert: assert
@@ -54,8 +55,9 @@ class ExoidRouter
       resolve handler body, req, io
     .then (result) ->
       {result, error: null}
-    .catch (error) ->
-      log.error error
+    .catch (error) =>
+      if @logErrors
+        log.error error
       errObj = if error._exoid
         {status: error.status, info: error.info}
       else
