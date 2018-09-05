@@ -118,8 +118,8 @@ class ExoidRouter
           }
           .then (response) ->
             responseChunk[request.streamId] = response
-        .catch (err) ->
-          console.log 'caught exoid error', err
+          .catch (err) ->
+            console.log 'caught exoid error', err
         .then ->
           isComplete = true
 
